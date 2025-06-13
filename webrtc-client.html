@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WebRTC com Express</title>
+  </head>
+  <body>
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      const localVideo = document.getElementById("localVideo");
+      const remoteVideo = document.getElementById("remoteVideo");
+
+      // 1. Pegar stream da câmera
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          localVideo.srcObject = stream;
+
+          // 2. Configurar PeerConnection
+          const peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+          });
+
+          // Adiciona stream à conexão
+          stream.getTracks().forEach((track) => {
+            peerConnection.addTrack(track, stream);
+          });
+
+          // 3. Troca de SDP (Offer/Answer)
+          peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+              socket.emit("ice-candidate", event.candidate);
+            }
+          };
+
+          peerConnection.ontrack = (event) => {
+            remoteVideo.srcObject = event.streams[0];
+          };
+
+          // Inicia a chamada
+          peerConnection
+            .createOffer()
+            .then((offer) => peerConnection.setLocalDescription(offer))
+            .then(() => {
+              socket.emit("offer", peerConnection.localDescription);
+            });
+
+          // Recebe Offer/Answer e ICE Candidates
+          socket.on("offer", async (offer) => {
+            await peerConnection.setRemoteDescription(offer);
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit("answer", answer);
+          });
+
+          socket.on("answer", (answer) => {
+            peerConnection.setRemoteDescription(answer);
+          });
+
+          socket.on("ice-candidate", (candidate) => {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          });
+        })
+        .catch((err) => console.error("Erro ao acessar mídia:", err));
+    </script>
+  </body>
+</html>

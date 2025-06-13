@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Chamada de Vídeo WebRTC</title>
+    <style>
+      video {
+        width: 300px;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Chamada WebRTC</h1>
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+
+    <!-- Socket.io + WebRTC -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      const localVideo = document.getElementById("localVideo");
+      const remoteVideo = document.getElementById("remoteVideo");
+
+      // 1. Pegar stream da câmera/microfone
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          localVideo.srcObject = stream;
+
+          // 2. Configurar a conexão P2P (PeerConnection)
+          const peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }], // Servidor STUN público
+          });
+
+          // Adiciona a stream local à conexão
+          stream.getTracks().forEach((track) => {
+            peerConnection.addTrack(track, stream);
+          });
+
+          // 3. Quando receber uma stream remota, exibe no vídeo
+          peerConnection.ontrack = (event) => {
+            remoteVideo.srcObject = event.streams[0];
+          };
+
+          // 4. Troca de ICE Candidates (para estabelecer conexão direta)
+          peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+              socket.emit("ice-candidate", event.candidate);
+            }
+          };
+
+          // 5. Inicia a chamada (cria uma "oferta" SDP)
+          peerConnection
+            .createOffer()
+            .then((offer) => peerConnection.setLocalDescription(offer))
+            .then(() => {
+              socket.emit("offer", peerConnection.localDescription);
+            });
+
+          // 6. Recebe eventos do Socket.io
+          socket.on("offer", async (offer) => {
+            await peerConnection.setRemoteDescription(offer);
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit("answer", answer);
+          });
+
+          socket.on("answer", (answer) => {
+            peerConnection.setRemoteDescription(answer);
+          });
+
+          socket.on("ice-candidate", (candidate) => {
+            peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          });
+        })
+        .catch((err) => {
+          console.error("Erro ao acessar câmera/microfone:", err);
+          alert("Permita o acesso à câmera e ao microfone!");
+        });
+    </script>
+  </body>
+</html>
